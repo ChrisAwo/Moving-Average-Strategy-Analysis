@@ -105,7 +105,9 @@ trades_data.to_sql(name='trades_data', con=engine, if_exists='replace', index=Fa
 
 ## Power BI Dashboard
 
-
+![backtest 1](backtest2/1)
+![backtest 2](backtest2/2)
+![backtest 3](backtest2/3)
 
 ---
 
