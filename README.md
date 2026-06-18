@@ -1,5 +1,5 @@
 
-# Moving Average Strategy Analysis
+# Moving Average Strategy Analysis (Python, MySQL, Power BI)
 
 
 ## Project Overview
@@ -103,17 +103,9 @@ trades_data.to_sql(name='trades_data', con=engine, if_exists='replace', index=Fa
 
 ---
 
-## Dashboard Overview
+## Power BI Dashboard
 
-The dashboard compares multiple moving average strategies and highlights:
 
-* Final account balance
-* Strategy profitability
-* Maximum drawdown
-* Number of trades
-* Average holding period
-* Win rate
-* Asset performance
 
 ---
 
