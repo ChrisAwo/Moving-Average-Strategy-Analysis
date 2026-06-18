@@ -39,12 +39,67 @@ for ma in ma_list:
         price = price.reset_index()
 ```
 
+2. Calculate moving averages and trading signals, and track performance metrics such as returns, drawdowns, holding periods, and win rates.
+```python
+        # -------- BASIC DATA --------
+        price['Asset'] = ticker
+        price['Returns'] = price['Close'] / price['Close'].shift(1)
+        price.loc[0, 'Returns'] = 1
+        price['Bench_Bal'] = starting_balance * price['Returns'].cumprod()
+
+        # -------- STRATEGY --------
+        price['MA_Series'] = price['Close'].rolling(window=ma).mean()
+        price['Longs'] = price['Close'] > price['MA_Series']
+
+        price['Sys_Ret'] = np.where(price['Longs'].shift(1) == True, price['Returns'], 1)
+        price['Sys_Bal'] = starting_balance * pd.Series(price['Sys_Ret']).cumprod()
+
+        price['MA_Type'] = ma
+        price['Bench_Peak'] = price.Bench_Bal.cummax()
+        price['Bench_DD'] = price.Bench_Bal - price.Bench_Peak
+        price['max_dd'] = ((price.Bench_DD / price.Bench_Peak).min())
+```
+
+3. Simulate trades based on entry and exit rules.
+```python
+        # -------- ENTRY / EXIT --------
+        price['Entry'] = (price['Longs'] == True) & (price['Longs'].shift(1) == False)
+        price['Exit']  = (price['Longs'] == False) & (price['Longs'].shift(1) == True)
+
+        # -------- EXTRACT TRADES --------
+        entries = price.loc[price['Entry']].copy()
+        exits   = price.loc[price['Exit']].copy()
+
+        entries = entries.reset_index(drop=True)
+        exits   = exits.reset_index(drop=True)
+
+        min_len = min(len(entries), len(exits))
+        entries = entries.iloc[:min_len]
+        exits   = exits.iloc[:min_len]
+```
+
+4. Store and organize results.
    
-3. Calculate moving averages and trading signals.
-4. Simulate trades based on entry and exit rules.
-5. Track performance metrics such as returns, drawdowns, holding periods, and win rates.
-6. Store and organize results using SQL.
-7. Connect SQL data to Power BI for visualization and analysis.
+```python
+all_prices.append(price)
+all_trades.append(trades)
+
+final_data = pd.concat(all_prices, ignore_index=True)
+trades_data = pd.concat(all_trades, ignore_index=True)
+```
+
+5. Connect SQL data to Power BI for visualization and analysis.
+   
+```python
+from sqlalchemy import create_engine
+engine = create_engine("mysql+pymysql://root:root@localhost/ma_analysis")
+
+final_data.to_csv('price_data.csv', index=False)
+trades.to_csv('trades_data.csv', index=False)
+
+final_data.to_sql(name='price_data', con=engine, if_exists='replace', index=False)
+trades_data.to_sql(name='trades_data', con=engine, if_exists='replace', index=False)
+```
 
 ---
 
@@ -99,20 +154,76 @@ Some of the SQL techniques used in this project include:
 * Window Functions
 * Ranking Functions
 
-Example:
+Blocks of code below:
 
 ```sql
-WITH TradeStats AS (
+CREATE TABLE executive_summary AS
+WITH trade_stats AS (
     SELECT
         MA_Type,
-        AVG(Trade_Return) AS Avg_Return
-    FROM Trades
+        COUNT(*) AS Total_Trades,
+        round(AVG(Trade_Return), 4) AS Avg_Return,
+        round(SUM(Trade_Return), 4) AS Total_Return,
+        round(AVG(CASE WHEN Result = 'Win' THEN 1 ELSE 0 END) * 100, 2) AS Win_Rate,
+        round(max(Holding_Period), 2) as Max_Holding,
+		round(avg(Holding_Period), 2) as Avg_Holding
+    FROM trades_data
     GROUP BY MA_Type
-)
-SELECT *
-FROM TradeStats;
-```
+),
 
+drawdown_stats AS (
+    SELECT
+        MA_Type,
+        MIN((Sys_Bal - Bench_Bal) / Bench_Bal) AS Max_Drawdown,
+        (Sys_Bal - Bench_Peak) / Bench_Peak AS Drawdown
+    FROM price_data
+    GROUP BY MA_Type, Drawdown
+)
+
+SELECT 
+    t.*,
+    d.Max_Drawdown
+FROM trade_stats t
+JOIN drawdown_stats d
+ON t.MA_Type = d.MA_Type;
+
+select * from executive_summary;
+
+
+CREATE TABLE return_distribution AS
+WITH stats AS (
+    SELECT
+        MA_Type,
+        Trade_Return,
+
+        AVG(Trade_Return) OVER (
+            PARTITION BY MA_Type
+        ) AS Mean_Return,
+
+        STDDEV(Trade_Return) OVER (
+            PARTITION BY MA_Type
+        ) AS Std_Return
+    FROM trades_data
+)
+
+SELECT
+    MA_Type,
+    Trade_Return,
+
+    CASE 
+        WHEN Std_Return = 0 THEN NULL
+        ELSE (Trade_Return - Mean_Return) / Std_Return
+    END AS Z_Score,
+
+    RANK() OVER (
+        PARTITION BY MA_Type 
+        ORDER BY Trade_Return DESC
+    ) AS Return_Rank
+FROM stats;
+
+select * from return_distribution;
+
+```
 ---
 
 ## Key Takeaway
